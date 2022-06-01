@@ -1,0 +1,205 @@
+BEDROCK
+## 1.data_preparation ##
+
+##plot data##
+plot(bedrock$X,bedrock$Ni, xlab = "Easting", ylab = "Kandungan Ni",pch = 19, col = "black")
+lines(bedrock$X,bedrock$Ni, xlab = "Easting", ylab = "Kandungan Ni", pch = 19, col = "blue")
+
+##create the histogram of variable nilai##
+hist(bedrock$Ni, xlab = "Ni", breaks = "Freedman-Diaconis", main = "Histogram Ni", col = "gray87")
+
+#Creating Plot
+histogram(~ Ni, data = bedrock,
+          xlab = "Kadar Ni", 
+          col = "slategray4",
+          ylab = "Frequency",
+          breaks = 40, 
+          type = "density", 
+          panel = function(x, ...) {
+            panel.histogram(x, ...)
+            xn <- seq(min(x), max(x), length.out = 100)
+            yn <- dnorm(xn, mean(x), sd(x))
+            panel.lines(xn, yn, col = "black")
+          })
+
+
+a = density(bedrock$Ni)
+hist(bedrock$Ni, breaks = 40, xlab = "Ni", freq = FALSE, ylab = "Frequency", main = "Histogram bedrock Ni", col = "gray47" )
+lines(a)
+
+
+#spatial interpolation#
+coordinates(bedrock) <- ~X+Y
+v.cloud = variogram(Ni ~ 1, data = bedrock, cloud= T)
+head(v.cloud)
+plot(v.cloud, 
+     xlab = "Separation distance (m)", 
+     col = "black")
+v = variogram(Ni ~ 1, data = bedrock, cloud = F)
+v
+plot(v, main = "Variogram - default", xlab = "Separation distance (m)")
+v.map = variogram(Ni ~ 1, bedrock, map = TRUE, cutoff=200, width=50)
+plot(v.map, col.regions = bpy.colors(64), main="Variogram Map", xlab="x", ylab="y")
+
+## 2. Experimental Variogram ##
+gs = gstat(id = "Ni", formula = Ni~1, locations = ~X+Y, data = bedrock)
+
+##calculate the experimental variogram##
+exp_var = variogram(gs)
+
+##plot the experimental variogram##
+plot(exp_var)
+
+## 3. Variogram Modeling ##
+#create variogram model#
+vg_model7 = vgm(psill = 0.0232, model = "Sph", range = 25, nugget = 0)
+vg_model8 = vgm(psill = 0.0232, model = "Exp", range = 25, nugget = 0)
+vg_model9 = vgm(psill = 0.0232, model = "Gau", range = 25, nugget = 0)
+
+vg_model17 = fit.variogram(exp_var, model = vg_model7)
+vg_model18 = fit.variogram(exp_var, model = vg_model8)
+vg_model19 = fit.variogram(exp_var, model = vg_model9)
+
+a = plot(exp_var, model = vg_model7, cloud=T, col = "black", pch = 19, type = "b", main = "Bedrock")
+b = plot(exp_var, model = vg_model8, cloud=T, col = "black", pch = 19, type = "b")
+c = plot(exp_var, model = vg_model9, cloud=T, col = "black", pch = 19, type = "b")
+d = c(a,b,c)
+d
+
+#plot the variogram model#
+plot(exp_var, model = vg_model7, cloud=T, col = "blue")
+
+#update the gstat object#
+gs = gstat(id = "Ni", formula = Ni~1, locations = ~X+Y, 
+           data = bedrock, 
+           nmax = 0.0275, 
+           model = vg_model19)
+
+## 4. kriging ##
+#creating grid for kriging#
+summary(bedrock)
+x = seq(from = 8638, to = 9051)
+y = seq(from = 12662, to = 13075)
+
+#the variable X and Y are the same name of the gs object#
+xy_grid = expand.grid(X=x, Y=y)
+
+#do kriging#
+hasil_kriging = predict(gs, newdata = xy_grid, debug.level = -1)
+
+#plot the result#
+aux = hasil_kriging$Ni.pred
+#convert a vector to a matrix (for plotting purpose)#
+dim(aux) = c(length(x),length(y))
+image(x,y,aux,asp=1)
+contour(x,y,aux, asp=1, drawlabels = TRUE, col = "black", add = TRUE)
+#plot the data location#
+points(bedrock$X, bedrock$Y, pch = "+")
+
+#other plotting methods#
+#use lattice package#
+levelplot(hasil_kriging$Ni.pred ~ hasil_kriging$X + hasil_kriging$Y, 
+          col.regions = heat.colors(100), 
+          main = "Ordinary Kriging Estimate",
+          xlab = "X", ylab = "Y")
+
+#us sp package#
+aux = hasil_kriging
+coordinates(aux) = c("X", "Y")
+p = spplot(aux["Ni.pred"], asp = 1, colorkey = TRUE, xlim = c(8638,9051), ylim = c(12662,13075), 
+           scales = list(draw = TRUE) )
+p + layer(panel.points(X, Y, col = "black", pch = 1), data = limonit)
+
+#plot the kriging variance result#
+aux_var = hasil_kriging$Ni.var
+#convert a vector to a matrix (for plotting purpose)
+dim(aux_var) = c(length(x),length(y))
+image(x,y,aux_var,asp=1)
+points(bedrock$X, bedrock$Y, pch = "+")
+
+#other plotting methods#
+#use lattice package#
+levelplot(hasil_kriging$Ni.var ~ hasil_kriging$X + hasil_kriging$Y, 
+          col.regions = heat.colors(100),
+          main = "Ordinary Kriging Variances" ,
+          xlab = "X", ylab = "Y")
+
+#us sp package#
+aux_var = hasil_kriging
+coordinates(aux_var) <- c("X", "Y")
+p <- spplot(aux_var["Ni.var"], asp = 1, colorkey = TRUE, xlim = c(8638,9051), ylim = c(12662,13075), 
+            scales = list(draw = TRUE) )
+p + layer(panel.points(X, Y, col = "black", pch = 1), data = limonit)
+
+#cropping the prediction#
+aux = hasil_kriging$Ni.pred
+aux[hasil_kriging$Ni.var>1.4]=NA
+#convert a vector to a matrix (for plotting purpose)
+dim(aux) = c(length(x),length(y))
+image(x,y,aux,asp=1)
+points(limonit$X, limonit$Y, pch = "+")
+#other plotting methods#
+#use lattice package#
+levelplot(aux ~ hasil_kriging$X + hasil_kriging$Y, col.regions = heat.colors(100))
+#use sp package#
+aux = hasil_kriging$Ni.pred
+aux[hasil_kriging$Ni.var>1.4]=NA
+aux_sp = hasil_kriging
+aux_sp["Ni.pred"]=aux
+coordinates(aux_sp) <- c("X", "Y")
+p <- spplot(aux_sp["Ni.pred"], asp = 1, colorkey = TRUE, xlim = c(8638,9051), ylim = c(12662,13075), 
+            scales = list(draw = TRUE) )
+p + layer(panel.points(X, Y, col = "black", pch = 1), data = limonit)
+
+## 5. cross validation ##
+cross_val = gstat.cv(gs, nfold = nrow(bedrock))
+plot(observed ~ Ni.pred, data = cross_val, asp = 1)
+abline(a = 0, b = 1, col = 2, lwd = 2)
+#calculate RMSE (root mean squared error)
+#sqrt (cross_val$residual^2)/length (cross_val$residual))
+sqrt(mean(cross_val$residual^2))
+#calculate mean error#
+#should be close to 0#
+mean(cross_val$residual)
+#calculate MSDR (mean squared deviation ratio)#
+#should be close to 1#
+mean(cross_val$residual^2/cross_val$Ni.var)
+
+## 6. simulation ##
+hasil_simulasi = predict(gs, newdata = xy_grid, debug.level = -1, nsim = 10)
+aux = hasil_simulasi$sim3
+#convert a vector to a matrix (for plotting purpose)#
+dim(aux) = c(length(x), length(y))
+image(x,y,aux,asp = 1)
+points(limonit$X, limonit$Y, pch = "+")
+#another plotting method#
+#use lattice package#
+levelplot(aux ~ hasil_simulasi$X + hasil_simulasi$Y, col.regions = heat.colors(100))
+#use sp package#
+aux = hasil_simulasi
+coordinates(aux) = c("X", "Y")
+spplot(aux, colorkey = TRUE)
+
+## 7. variogram map ##
+var_map = variogram(gs, cutoff = 200, width = 30, map = TRUE)
+plot(var_map)
+
+#anisotropic variograms#
+exp_vg_aniso = variogram(gs, alpha = c(0,180,45,225,90,270,135,315))
+plot(exp_vg_aniso)
+vg_model_aniso = vgm(psill = 0.032, "Gau", range = 13, nugget = 0, anis = c(0,1))
+plot(exp_vg_aniso, vg_model_aniso, as.table = TRUE, pch = 19, type = "b")
+
+vg_model_anisofit = fit.variogram(exp_vg_aniso, model = vg_model_aniso)
+plot(exp_vg_aniso, vg_model_anisofit, as.table = TRUE, pch = 19, type = "b")
+
+#update the gstat object#
+gs_aniso = gstat(id = "Ni", formula = Ni~1, locations = ~X+Y, data = limonit)
+
+#kriging using anisotropic variograms#
+hasil_kriging_aniso = predict(gs_aniso, newdata = xy_grid, debug.level = -1)
+
+#plot use lattice package#
+levelplot(hasil_kriging_aniso$Ni.pred ~ hasil_kriging_aniso$X + hasil_kriging_aniso$Y, col.regions = heat.colors(100))
+
+
